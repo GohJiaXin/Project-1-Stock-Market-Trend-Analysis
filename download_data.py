@@ -126,7 +126,7 @@ def main():
     if 'data_downloaded' not in st.session_state:
         st.session_state.data_downloaded = False
 
-    # Define base directory
+    # Define base directory NEED to change to your own path
     base_dir = r"C:\Users\Goh Jia Xin\OneDrive - Singapore Polytechnic\Desktop\Project-1-Stock-Market-Trend-Analysis-main"
     
     # Create tabs for different functionalities
