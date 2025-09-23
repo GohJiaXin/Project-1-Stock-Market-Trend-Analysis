@@ -27,15 +27,43 @@ def display_line_chart_for_close_prices(data, title="Stock Close Prices"):
 def display_in_candlesticks(data, title="CandleSticks Chart"):
     mpf.plot(data, type='candle', style='yahoo', volume=True)
 
-def calculate_sma(data, window_size=[20, 50, 200]):
+# O(n)
+def calculate_sma(data, windows=[20, 50, 200]):
+    """
+    Compute SMA for multiple window sizes using sliding window trick.
+
+    Args:
+        prices: list or pd.Series of closing prices
+        windows: list of integers (window sizes)
+
+    Returns:
+        dict: {window_size: list_of_sma_values}
+    """
     close_prices = data['Close']
-    moving_averages = {window: [] for window in window_size}
-    for window in window_size:
-        for i in range(len(close_prices) - window + 1):
-            window_data = close_prices.iloc[i : i + window]
-            window_average = round(window_data.mean(), 2)
-            moving_averages[window].append(window_average)
-    return moving_averages
+    # ensure it's a list
+    prices = list(close_prices)  
+    n = len(close_prices)
+    sma_dict = {}
+
+    for k in windows:
+        if k > n:
+            # window larger than data → empty
+            sma_dict[k] = []  
+            continue
+
+        # Initial window sum
+        window_sum = sum(prices[:k])
+        result = [round(window_sum / k, 2)]
+
+        # Sliding window update
+        for i in range(k, n):
+            # add new, remove old
+            window_sum += prices[i] - prices[i - k]  
+            result.append(round(window_sum / k, 2))
+
+        sma_dict[k] = result
+
+    return sma_dict
 
 def validate_sma(data, window_size=[20, 50, 200]):
     manual_sma = calculate_sma(data, window_size)
@@ -101,4 +129,5 @@ def test_run():
         print("SMA validation failed. Please check the calculations.")
     
 if __name__ == "__main__":
+
     test_run()
