@@ -126,7 +126,8 @@ def test_run():
     print(stock_data.tail())
 
     # Validate SMA calculation before displaying charts
-    if validate_sma(stock_data) is True:
+    validation_results = validate_sma(stock_data)
+    if all(validation_results.values()):
         chart_type = input("Choose chart type: (1) Line Chart with SMA, (2) Candlestick Chart with SMA: ")
         if chart_type == "1":
             display_close_and_sma_chart(stock_data, ma_data, title=f"{ticker_symbol} Close Prices")
