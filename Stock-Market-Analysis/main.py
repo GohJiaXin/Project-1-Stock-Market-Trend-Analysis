@@ -1488,7 +1488,7 @@ def main():
                 user_choice = st.radio(
                     "Choose analysis type:",
                     ["Standard Daily Returns (Day-to-Day)", "Returns Based on My Buy Price"],
-                    key="returns_choice"
+                    key="returns_choice_main"
                 )
                 
                 if user_choice == "Returns Based on My Buy Price":
