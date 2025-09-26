@@ -6,7 +6,7 @@ from datetime import datetime, timedelta  # For handling dates and time periods
 import os  # For operating system interactions (file paths, directories)
 import matplotlib.pyplot as plt  # For creating static visualizations
 import mplfinance as mpf  # For creating financial charts (candlesticks)
-import numpy as np  # For numerical operations (though not heavily used here)
+import numpy as np  # For numerical operations
 from io import BytesIO  # For handling file input/output operations
 import seaborn as sns  # For enhanced data visualization
 
@@ -89,11 +89,12 @@ def clean_csv(filepath: str):
     print(f"Cleaned file saved back to {filepath}")
     return df
 
-def select_and_analyze_csv(base_dir: str):
+def select_and_analyze_csv(base_dir: str, tab_type="basic"):
     """Let the user pick a CSV file if multiple exist in the directory.
     
     Args:
         base_dir (str): Directory path to search for CSV files
+        tab_type (str): Type of analysis tab ("basic", "advanced")
         
     Returns:
         tuple: (filepath, selected_analysis) - Path to selected file and list of analysis options chosen
@@ -109,7 +110,7 @@ def select_and_analyze_csv(base_dir: str):
     # If multiple CSV files, let user choose one
     if len(csv_files) > 1:
         st.subheader("Select CSV File")
-        selected_file = st.selectbox("Choose a CSV file to analyze:", csv_files)
+        selected_file = st.selectbox("Choose a CSV file to analyze:", csv_files, key=f"select_{tab_type}")
         filepath = os.path.join(base_dir, selected_file)
         st.info(f"You selected: {selected_file}")
     else:
@@ -117,15 +118,16 @@ def select_and_analyze_csv(base_dir: str):
         filepath = os.path.join(base_dir, csv_files[0])
         st.success(f"Found 1 CSV file: {csv_files[0]}")
     
-    # Analysis options for user to choose from
-    st.subheader("📊 Select Analysis Functionality")
-    analysis_options = ["SMA", "Upward and Downward Runs", "Daily Returns", 
-                       "Max Profit Calculations", "Line Chart", "Candlestick Chart", 
-                       "Seaborn SMA Chart", "Seaborn Runs Chart"]
+    # Different analysis options based on tab type
+    if tab_type == "basic":
+        analysis_options = ["SMA", "Upward and Downward Runs", "Daily Returns", 
+                           "Line Chart", "Candlestick Chart", "Seaborn SMA Chart", "Seaborn Runs Chart"]
+    elif tab_type == "advanced":
+        analysis_options = ["Trend Analysis", "Max Profit Calculations", "Daily Returns Analysis"]
     
     # Multi-select widget for analysis choices
     selected_analysis = st.multiselect(
-        "Choose one or more analyses to run:", analysis_options
+        "Choose one or more analyses to run:", analysis_options, key=f"analysis_{tab_type}"
     )
     
     return filepath, selected_analysis
@@ -173,65 +175,71 @@ def display_candlesticks(data, title="CandleSticks Chart"):
     axes[0].set_title(title)  # Set title on main axis
     return fig
 
-
 def calculate_sma(data, windows=[20, 50, 200]):
     """
     Compute SMA for multiple window sizes using sliding window trick.
+    Manual implementation without using pandas rolling for demonstration.
 
     Args:
-        data: DataFrame with 'Close' column
+        data: DataFrame containing 'Close' prices
         windows: list of integers (window sizes)
 
     Returns:
         dict: {window_size: list_of_sma_values}
     """
     close_prices = data['Close']
-    prices = list(close_prices)  # Ensure it's a list
+    prices = list(close_prices)  # Convert to list for manual processing
     n = len(close_prices)
-    sma_dict = {}
+    sma_dict = {}  # Dictionary to store results
 
     for k in windows:
         if k > n:
-            sma_dict[k] = []  # Window larger than data → empty
+            # Window larger than available data → empty result
+            sma_dict[k] = []  
             continue
 
-        result = []
-        # Calculate SMA only when a full window of k prices is available
-        for i in range(k - 1, n):
-            window = prices[i - k + 1:i + 1]
-            if len(window) == k:  # Ensure full window
-                window_sum = sum(window)
-                result.append(round(window_sum / k, 2))
+        # Calculate initial window sum (first k elements)
+        window_sum = sum(prices[:k])
+        # Start result list with first SMA value
+        result = [round(window_sum / k, 2)]
 
-        sma_dict[k] = result
+        # Slide window through remaining data points
+        for i in range(k, n):
+            # Update sum: add new price, remove oldest price
+            window_sum += prices[i] - prices[i - k]  
+            # Calculate and append new SMA value
+            result.append(round(window_sum / k, 2))
+
+        sma_dict[k] = result  # Store results for this window size
 
     return sma_dict
 
-# Validate manual SMA calculation against pandas rolling mean
 def validate_sma(data, window_size=[20, 50, 200]):
+    """Validate manual SMA calculation against pandas rolling mean.
+    
+    Args:
+        data (pd.DataFrame): Stock data with Close prices
+        window_size (list): List of window sizes to validate
+        
+    Returns:
+        dict: Validation results for each window size
+    """
+    # Calculate SMA using manual method
     manual_sma = calculate_sma(data, window_size)
-    # Convert np.float64 to Python float for comparison
+    # Convert to float for consistent comparison
     manual_sma = {window: [float(val) for val in vals] for window, vals in manual_sma.items()}
-    rolling_sma = {
-        window: data['Close'].rolling(window=window).mean().dropna().round(2).tolist()
-        for window in window_size
-    }
+    
+    # Calculate SMA using pandas built-in rolling mean
+    rolling_sma = {window: data['Close'].rolling(window=window).mean().dropna().round(2).tolist() 
+                  for window in window_size}
     rolling_sma = {window: [float(val) for val in vals] for window, vals in rolling_sma.items()}
-
-    all_ok = True
+    
+    # Compare results for each window size
+    validation_results = {}
     for window in window_size:
-        m = manual_sma[window]
-        r = rolling_sma[window]
-
-        # ✅ Use tolerance instead of strict equality
-        if not np.allclose(m, r, rtol=1e-5, atol=0.01):
-            diffs = [(i, m[i], r[i]) for i in range(min(len(m), len(r))) if not np.isclose(m[i], r[i], atol=0.01)]
-            print(f"❌ Window {window} differs at {len(diffs)} positions, e.g.: {diffs[:5]}")
-            all_ok = False
-        else:
-            print(f"✅ Window {window} matches within tolerance.")
-
-    return {window: np.allclose(m, r, rtol=1e-5, atol=0.01) for window in window_size}
+        validation_results[window] = manual_sma[window] == rolling_sma[window]
+    
+    return validation_results
 
 def calculate_moving_averages(data, windows=[20, 50, 200]):
     """Calculate moving averages using pandas rolling mean.
@@ -323,7 +331,9 @@ def analyze_upward_downward_runs(data):
     
     return upward_runs, downward_runs
 
-def calculate_max_profit(data):
+# Max Profit Calculation Functions
+
+def single_pass_max_profit(data):
     """Calculate maximum profit possible from historical data (best buy/sell points).
     Implements algorithm to find maximum difference with constraint that buy must come before sell.
     
@@ -357,6 +367,267 @@ def calculate_max_profit(data):
             sell_date = row['Date']  # Set sell date
     
     return buy_date, sell_date, max_profit
+
+def brute_force_max_profit(data):
+    """Calculate maximum profit using brute force approach (O(n^2) complexity).
+    
+    Args:
+        data (pd.DataFrame): Stock data with Date and Close prices
+        
+    Returns:
+        tuple: (buy_date, sell_date, max_profit) - Optimal trading dates and profit
+    """
+    dr = data.reset_index()
+    max_profit = 0.0
+    buy_date = None
+    sell_date = None
+    n = len(dr)
+    
+    # Check all possible buy/sell pairs
+    for i in range(n):
+        for j in range(i + 1, n):
+            profit = float(dr.loc[j, 'Close'] - dr.loc[i, 'Close'])
+            if profit > max_profit:
+                max_profit = profit
+                buy_date = dr.loc[i, 'Date']
+                sell_date = dr.loc[j, 'Date']
+                
+    return buy_date, sell_date, float(max_profit)
+
+def vectorized_max_profit(data):
+    """Calculate maximum profit using vectorized approach (O(n) complexity).
+    
+    Args:
+        data (pd.DataFrame): Stock data with Date and Close prices
+        
+    Returns:
+        tuple: (buy_date, sell_date, max_profit) - Optimal trading dates and profit
+    """
+    dr = data.reset_index()
+    prices = dr['Close'].to_numpy(dtype=float)
+    
+    if prices.size == 0:
+        return None, None, 0.0
+        
+    # Use cumulative minimum to track best buy price up to each point
+    cummin_prices = np.minimum.accumulate(prices)
+    profits = prices - cummin_prices
+    j = int(np.argmax(profits))  # Find best sell index
+    max_profit = float(profits[j])
+    
+    if max_profit <= 0:
+        return None, None, 0.0
+        
+    # Find corresponding buy index
+    i = int(np.where(prices[:j+1] == cummin_prices[j])[0][0])
+    buy_date = dr.loc[i, 'Date']
+    sell_date = dr.loc[j, 'Date']
+    
+    return buy_date, sell_date, float(max_profit)
+
+def _tuple_equal(a, b, tol=1e-9):
+    """Helper function to compare max profit results with tolerance.
+    
+    Args:
+        a, b: Tuples of (buy_date, sell_date, profit)
+        tol: Tolerance for floating point comparison
+        
+    Returns:
+        bool: True if results are effectively equal
+    """
+    da1, ds1, p1 = a
+    da2, ds2, p2 = b
+    return (da1 == da2) and (ds1 == ds2) and (abs(float(p1) - float(p2)) <= tol)
+
+def validate_max_profit_calculations(data):
+    """Validate all max profit calculation methods against each other.
+    
+    Args:
+        data (pd.DataFrame): Stock data with Date and Close prices
+        
+    Returns:
+        dict: Results from all methods and validation status
+    """
+    r_single = single_pass_max_profit(data)
+    r_brute  = brute_force_max_profit(data)
+    r_vect   = vectorized_max_profit(data)
+    
+    all_equal = _tuple_equal(r_single, r_brute) and _tuple_equal(r_single, r_vect)
+    
+    return {
+        'single_pass': r_single,
+        'brute_force': r_brute,
+        'vectorized': r_vect,
+        'all_equal': all_equal
+    }
+
+# Trend Analysis Functions
+
+def validate_trend(df):
+    """Add upward and downward trend columns to DataFrame using pandas diff.
+    
+    Args:
+        df (pd.DataFrame): Stock data with Close prices
+        
+    Returns:
+        pd.DataFrame: DataFrame with added trend columns
+    """
+    df = df.copy()
+    df['Upward_Trend'] = df['Close'].diff() > 0  # True if today's close > yesterday's
+    df['Downward_Trend'] = df['Close'].diff() < 0  # True if today's close < yesterday's
+    return df
+
+def manual_trend(df):
+    """Manually count upward/downward movements and longest streaks (O(n) complexity).
+    
+    Args:
+        df (pd.DataFrame): Stock data with Close prices
+        
+    Returns:
+        tuple: Various trend statistics and streak information
+    """
+    close_prices = df['Close'].tolist()
+    upward_trends = 0
+    downward_trends = 0
+    longest_streak_up = 0
+    current_streak_up = 0
+    longest_streak_down = 0
+    current_streak_down = 0
+    up_streak_start = 0
+    up_streak_end = 0
+    down_streak_start = 0
+    down_streak_end = 0
+    current_up_start = 0
+    current_down_start = 0
+
+    for i in range(1, len(close_prices)):
+        # Compare prices with previous day
+        if close_prices[i] > close_prices[i-1]:
+            # Current price > yesterday's price = Up ++
+            upward_trends += 1
+            if current_streak_up == 0:
+                current_up_start = i - 1
+            current_streak_up += 1
+            if current_streak_up > longest_streak_up:
+                longest_streak_up = current_streak_up
+                up_streak_start = current_up_start
+                up_streak_end = i
+        else:
+            current_streak_up = 0
+            
+        if close_prices[i] < close_prices[i-1]:
+            downward_trends += 1
+            if current_streak_down == 0:
+                current_down_start = i - 1
+            current_streak_down += 1
+            if current_streak_down > longest_streak_down:
+                longest_streak_down = current_streak_down
+                down_streak_start = current_down_start
+                down_streak_end = i
+        else:
+            current_streak_down = 0
+            
+    return (upward_trends, downward_trends, longest_streak_up, longest_streak_down, 
+            up_streak_start, up_streak_end, down_streak_start, down_streak_end)
+
+def plot_trend_candlestick(validated_data, manual_results, ticker_symbol):
+    """Plot candlestick chart with trend markers and longest streaks.
+    
+    Args:
+        validated_data (pd.DataFrame): DataFrame with trend columns
+        manual_results (tuple): Results from manual_trend function
+        ticker_symbol (str): Stock symbol for chart title
+        
+    Returns:
+        matplotlib.figure.Figure: The created figure object
+    """
+    # Extract manual trend results
+    upward_trends, downward_trends, longest_up, longest_down, up_streak_start, up_streak_end, down_streak_start, down_streak_end = manual_results
+    
+    # Prepare masks for up/down days
+    up_mask = validated_data['Upward_Trend']
+    down_mask = validated_data['Downward_Trend']
+
+    # Prepare marker data for mplfinance addplot
+    up_marker = np.where(up_mask, validated_data['High'] + 1, np.nan)  # Place marker above candle
+    down_marker = np.where(down_mask, validated_data['Low'] - 1, np.nan)  # Place marker below candle
+
+    # Create addplot objects for markers
+    ap_up = mpf.make_addplot(up_marker, type='scatter', markersize=50, marker='^', color='green', panel=0)
+    ap_down = mpf.make_addplot(down_marker, type='scatter', markersize=50, marker='v', color='red', panel=0)
+
+    # Prepare data for longest streak lines
+    up_streak_data = np.full(len(validated_data), np.nan)
+    down_streak_data = np.full(len(validated_data), np.nan)
+    
+    # Fill data for longest upward streak
+    if longest_up > 0:
+        up_streak_data[up_streak_start:up_streak_end + 1] = validated_data['Close'].iloc[up_streak_start:up_streak_end + 1]
+    
+    # Fill data for longest downward streak
+    if longest_down > 0:
+        down_streak_data[down_streak_start:down_streak_end + 1] = validated_data['Close'].iloc[down_streak_start:down_streak_end + 1]
+
+    # Create addplot objects for streak lines
+    ap_up_streak = mpf.make_addplot(up_streak_data, type='line', color='green', width=2, panel=0, label=f'Longest Upward Streak ({longest_up} days)')
+    ap_down_streak = mpf.make_addplot(down_streak_data, type='line', color='red', width=2, panel=0, label=f'Longest Downward Streak ({longest_down} days)')
+
+    # Plot candlestick chart with trend markers and streak lines
+    mc = mpf.make_marketcolors(up='g', down='r', edge='inherit', wick='inherit', volume='in')
+    s = mpf.make_mpf_style(marketcolors=mc)
+
+    fig, axes = mpf.plot(
+        validated_data,
+        type='candle',
+        style=s,
+        title=f"Candlestick Chart with Up/Down Trend Markers and Longest Streaks",
+        ylabel='Price',
+        volume=True,
+        show_nontrading=False,
+        addplot=[ap_up, ap_down, ap_up_streak, ap_down_streak],
+        returnfig=True,
+        figsize=(14, 10)
+    )
+    
+    return fig
+
+def run_trend_analysis(df, ticker_symbol):
+    """Run comprehensive trend analysis and validation.
+    
+    Args:
+        df (pd.DataFrame): Stock data
+        ticker_symbol (str): Stock symbol for display purposes
+        
+    Returns:
+        dict: Analysis results and validation status
+    """
+    # Manual calculation
+    manual_upward, manual_downward, longest_up, longest_down, up_streak_start, up_streak_end, down_streak_start, down_streak_end = manual_trend(df)
+    
+    # Validate using pandas diff
+    validated_data = validate_trend(df.copy())
+    validated_upward = int(validated_data['Upward_Trend'].sum())
+    validated_downward = int(validated_data['Downward_Trend'].sum())
+    
+    # Check if validations passed
+    upward_match = manual_upward == validated_upward
+    downward_match = manual_downward == validated_downward
+    all_validations_passed = upward_match and downward_match
+    
+    return {
+        'manual_upward': manual_upward,
+        'manual_downward': manual_downward,
+        'validated_upward': validated_upward,
+        'validated_downward': validated_downward,
+        'longest_up_streak': longest_up,
+        'longest_down_streak': longest_down,
+        'upward_match': upward_match,
+        'downward_match': downward_match,
+        'all_validations_passed': all_validations_passed,
+        'validated_data': validated_data,
+        'manual_results': (manual_upward, manual_downward, longest_up, longest_down, 
+                          up_streak_start, up_streak_end, down_streak_start, down_streak_end)
+    }
 
 # New Seaborn-based plotting functions
 
@@ -436,7 +707,88 @@ def plot_runs(df):
     ax.legend()
     plt.tight_layout()
     return fig
+# Add these functions to your existing code (place them with the other analysis functions)
 
+# Daily Returns Analysis Functions
+
+def return_for_user_price(df, buy_price):
+    """Calculate daily returns based on user's buy price.
+    
+    Args:
+        df (pd.DataFrame): Stock data with Close prices
+        buy_price (float): User's purchase price
+        
+    Returns:
+        pd.DataFrame: DataFrame with added return columns
+    """
+    df = df.copy()
+    # Calculate return relative to user's buy price
+    df['Daily_Return'] = (df['Close'] - buy_price) / buy_price
+    df['Percentage(%)'] = df['Daily_Return'] * 100  # Add percentage column
+    return df
+
+def validate_daily_returns(df):
+    """Calculate daily returns using pandas pct_change (day-to-day returns).
+    
+    Args:
+        df (pd.DataFrame): Stock data with Close prices
+        
+    Returns:
+        pd.DataFrame: DataFrame with added return columns
+    """
+    df = df.copy()
+    # Calculate day-to-day percentage change
+    df['Daily_Return'] = df['Close'].pct_change()
+    df['Percentage(%)'] = df['Daily_Return'] * 100  # Add percentage column
+    return df
+
+def manual_daily_returns(df):
+    """Manually calculate daily returns (O(n) complexity).
+    
+    Args:
+        df (pd.DataFrame): Stock data with Close prices
+        
+    Returns:
+        pd.DataFrame: DataFrame with added manual return columns
+    """
+    df = df.copy()
+    close_prices = df['Close'].tolist()
+    daily_returns = [None]  # First day has no previous day to compare
+    
+    # Calculate returns for each day compared to previous day
+    for i in range(1, len(close_prices)):
+        r_t = (close_prices[i] - close_prices[i-1]) / close_prices[i-1]
+        daily_returns.append(round(r_t, 6))  # Round to 6 decimal places
+    
+    df['Manual_Daily_Return'] = daily_returns
+    df['Percentage(%)'] = df['Manual_Daily_Return'] * 100  # Add percentage column
+    return df
+
+def run_daily_returns_analysis(df):
+    """Run comprehensive daily returns analysis and validation.
+    
+    Args:
+        df (pd.DataFrame): Stock data with Close prices
+        
+    Returns:
+        dict: Analysis results and validation status
+    """
+    # Calculate returns using different methods
+    validated_data = validate_daily_returns(df.copy())
+    manual_data = manual_daily_returns(df.copy())
+    
+    # Check if validations passed (compare manual vs pandas)
+    validation_passed = validated_data['Daily_Return'].round(6).equals(
+        manual_data['Manual_Daily_Return'].round(6)
+    )
+    
+    return {
+        'validated_data': validated_data,
+        'manual_data': manual_data,
+        'validation_passed': validation_passed,
+        'latest_validated': validated_data.iloc[-1][['Close', 'Daily_Return', 'Percentage(%)']],
+        'latest_manual': manual_data.iloc[-1][['Close', 'Manual_Daily_Return', 'Percentage(%)']]
+    }
 def main():
     """Main function to run the Streamlit application."""
     st.title("📈 Stock Data Downloader & Analyzer")
@@ -451,20 +803,20 @@ def main():
         st.session_state.data_downloaded = False  # Track if data was downloaded
     
     # Define base directory for storing CSV files
-    base_dir = r"C:\Users\desmo\OneDrive\Documents\SIT AC in Fintech\INF1002 (Programming Fundamentals)\Stock Market Analysis"
+    base_dir = r"C:\Users\Goh Jia Xin\Downloads\Project-1-Stock-Market-Trend-Analysis-main"
     
-    # Create tabs for different functionalities
-    tab1, tab2 = st.tabs(["Download Data", "Analyze Data"])
+    # Create tabs for different functionalities 
+    tab1, tab2, tab3 = st.tabs(["Download Data", "Basic Analysis", "Advanced Analysis"])
     
     with tab1:
         st.header("Download Stock Data")
         
         # Step 1: User enters stock ticker symbol
         ticker = st.text_input("Enter stock symbol (e.g., AAPL, TSLA, MSFT):", 
-                              value=st.session_state.ticker).upper()  # Convert to uppercase
+                              value=st.session_state.ticker, key="download_ticker").upper()  # Convert to uppercase
         
         # Button to validate stock symbol
-        if st.button("Check Symbol"):
+        if st.button("Check Symbol", key="check_symbol"):
             if not isinstance(ticker, str) or ticker.strip() == "":
                 st.error("Please enter a valid string as stock symbol.")
             else:
@@ -480,14 +832,14 @@ def main():
         if st.session_state.valid_symbol:
             years = st.number_input(
                 "Enter number of years of data to download (minimum 3):",
-                min_value=3, max_value=10, value=3, step=1
+                min_value=3, max_value=10, value=3, step=1, key="download_years"
             )
             
             # Define filename for saving data
             filename = os.path.join(base_dir, f"{st.session_state.ticker}_{years}Y.csv")
             
             # Button to initiate data download
-            if st.button("Download Stock Data"):
+            if st.button("Download Stock Data", key="download_data"):
                 with st.spinner(f"Downloading {years} years of data for {st.session_state.ticker}..."):
                     try:
                         # Download and clean data
@@ -512,13 +864,15 @@ def main():
                                 label="Download CSV",
                                 data=file,
                                 file_name=f"{st.session_state.ticker}_{years}Y.csv",
-                                mime="text/csv"
+                                mime="text/csv",
+                                key="download_csv"
                             )
                     except Exception as e:
                         st.error(f"Error downloading data: {str(e)}")
     
     with tab2:
-        st.header("Analyze Stock Data")
+        st.header("Basic Stock Analysis")
+        st.write("Perform basic technical analysis including moving averages, runs analysis, and chart visualizations.")
         
         # Check if there are CSV files available for analysis
         csv_files = [f for f in os.listdir(base_dir) if f.endswith(".csv")]
@@ -527,7 +881,7 @@ def main():
             st.warning("No CSV files found. Please download data first using the 'Download Data' tab.")
         else:
             # Let user select file and analysis options
-            filepath, selected_analysis = select_and_analyze_csv(base_dir)
+            filepath, selected_analysis = select_and_analyze_csv(base_dir, "basic")
             
             if filepath and selected_analysis:
                 # Load and prepare data for analysis
@@ -571,68 +925,24 @@ def main():
                     st.write("SMA Crossover Signals:")
                     st.dataframe(df_sma[['Close', 'MA_20', 'MA_50', 'Signal']].tail(10))
                     
-                    # # Validate SMA calculations
-                    # st.subheader("📊 SMA Validation Results")
-                    # validation_results = validate_sma(df)
-                    # for window, is_valid in validation_results.items():
-                    #     st.write(f"Window {window}: {'✓ Valid' if is_valid else '✗ Invalid'}")
-                    
-                    # # Display sample SMA values from manual calculation
-                    # st.write("Sample SMA Values (Manual Calculation):")
-                    # manual_sma = calculate_sma(df)
-                    # for window, values in manual_sma.items():
-                    #     if values:  # Only show if there are values
-                    #         st.write(f"Window {window}: First 5 values: {values[:5]}")
-                
                     # Validate SMA calculations
-                    st.subheader("📊 SMA Validation Results")
+                    st.write("SMA Validation (comparing manual vs pandas calculation):")
                     validation_results = validate_sma(df)
-
-                    # Turn results into a DataFrame for a clean table without index
-                    validation_df = pd.DataFrame({
-                        "Window": list(validation_results.keys()),
-                        "Validation": ["✅ Valid" if v else "❎ Invalid" for v in validation_results.values()]
-                    })  
+                    for window, is_valid in validation_results.items():
+                        st.write(f"Window {window}: {'✓ Valid' if is_valid else '✗ Invalid'}")
                     
-                    validation_df["Window"] = validation_df["Window"].astype(str)  # Ensure Window column is string for better display
-
-                    # Display the table with left-aligned "Window" column and no index
-                    st.dataframe(
-                        validation_df.style.set_properties(subset=["Window"], **{"text-align": "left"}),
-                        use_container_width=True,
-                        hide_index=True
-                    )
-
-                    # Display sample SMA values (manual calculation)
-                    st.subheader("🔍 Sample SMA Values (Manual Calculation)")
+                    # Display sample SMA values from manual calculation
+                    st.write("Sample SMA Values (Manual Calculation):")
                     manual_sma = calculate_sma(df)
-
-                    # Prepare table with first 5 values for each window without index
-                    sample_data = {
-                        "Window": [],
-                        "First 5 SMA Values": []
-                    }
-
                     for window, values in manual_sma.items():
                         if values:  # Only show if there are values
-                            sample_data["Window"].append(window)
-                            sample_data["First 5 SMA Values"].append(values[:5])
-
-                    sample_df = pd.DataFrame(sample_data) 
-                    sample_df["Window"] = sample_df["Window"].astype(str)  # Ensure Window column is string for better display
-                    
-                    # Left-align "Window" column and hide index
-                    st.dataframe(
-                        sample_df.style.set_properties(subset=["Window"], **{"text-align": "left"}),
-                        use_container_width=True,
-                        hide_index=True
-                    )
-
+                            st.write(f"Window {window}: First 5 values: {values[:5]}")
+                
                 if "Seaborn SMA Chart" in selected_analysis:
                     st.subheader("Seaborn SMA Chart")
                     
                     # Let user select SMA window size
-                    sma_window = st.slider("Select SMA Window:", min_value=5, max_value=100, value=20, step=5)
+                    sma_window = st.slider("Select SMA Window:", min_value=5, max_value=100, value=20, step=5, key="seaborn_sma")
                     
                     # Create and display Seaborn chart
                     fig = plot_close_sma(df, sma_window)
@@ -646,7 +956,7 @@ def main():
                     st.pyplot(fig)
                 
                 if "Daily Returns" in selected_analysis:
-                    st.subheader("📊 Daily Returns Statistics")
+                    st.subheader("Daily Returns Analysis")
                     
                     # Calculate daily percentage returns
                     df['Daily_Return'] = df['Close'].pct_change() * 100
@@ -663,17 +973,10 @@ def main():
                     
                     # Display return statistics
                     st.write("Daily Returns Statistics:")
-
-                    # More user interface friednly metrics display
-                    col1, col2, col3, col4 = st.columns(4)
-                    avg_return = df['Daily_Return'].mean()
-                    std_return = df['Daily_Return'].std()
-                    max_gain = df['Daily_Return'].max()
-                    max_loss = df['Daily_Return'].min()
-                    col1.metric("Average Daily Return", f"{avg_return:.2f}%", delta=None)
-                    col2.metric("Std Dev", f"{std_return:.2f}%")
-                    col3.metric("Max Gain", f"{max_gain:.2f}%")
-                    col4.metric("Max Loss", f"{max_loss:.2f}%")
+                    st.write(f"Average Daily Return: {df['Daily_Return'].mean():.2f}%")
+                    st.write(f"Standard Deviation: {df['Daily_Return'].std():.2f}%")
+                    st.write(f"Maximum Daily Gain: {df['Daily_Return'].max():.2f}%")
+                    st.write(f"Maximum Daily Loss: {df['Daily_Return'].min():.2f}%")
                 
                 if "Upward and Downward Runs" in selected_analysis:
                     st.subheader("Upward and Downward Runs Analysis")
@@ -681,57 +984,429 @@ def main():
                     # Analyze consecutive price movements
                     upward_runs, downward_runs = analyze_upward_downward_runs(df.reset_index())
                     
-                    # Display upward runs analysis
-                    st.write("📈 Upward Runs Analysis")
+                    # Create a DataFrame to display runs analysis in table format
+                    runs_data = []
                     
+                    # Add upward runs statistics
                     if upward_runs:
-                        up_df = pd.DataFrame({
-                        "Metric": ["🔹 Longest run", "🔹 Average run", "🔹 Total upward runs"],
-                        "Value": [f"{max(upward_runs)} days",
-                                f"{sum(upward_runs)/len(upward_runs):.2f} days",
-                                len(upward_runs)]
-                    })
-                        st.dataframe(
-                            up_df,
-                            use_container_width=True,
-                            hide_index=True
-                        )
+                        runs_data.append({
+                            "Run Type": "Upward",
+                            "Total Runs": len(upward_runs),
+                            "Longest Run (days)": max(upward_runs),
+                            "Average Run (days)": round(sum(upward_runs)/len(upward_runs), 2),
+                            "Shortest Run (days)": min(upward_runs),
+                            "Total Days in Runs": sum(upward_runs)
+                        })
                     else:
-                        st.write("No upward runs found")
-                    # Display downward runs analysis
-                    st.write("📉 Downward Runs Analysis")
+                        runs_data.append({
+                            "Run Type": "Upward",
+                            "Total Runs": 0,
+                            "Longest Run (days)": "N/A",
+                            "Average Run (days)": "N/A",
+                            "Shortest Run (days)": "N/A",
+                            "Total Days in Runs": 0
+                        })
+                    
+                    # Add downward runs statistics
                     if downward_runs:
-                        down_df = pd.DataFrame({
-                        "Metric": ["🔹 Longest run", "🔹 Average run", "🔹 Total downward runs"],
-                        "Value": [f"{max(downward_runs)} days",
-                                f"{sum(downward_runs)/len(downward_runs):.2f} days",
-                                len(downward_runs)]
-                    })
-                        st.dataframe(
-                            down_df,
-                            use_container_width=True,
-                            hide_index=True
-                        )
+                        runs_data.append({
+                            "Run Type": "Downward",
+                            "Total Runs": len(downward_runs),
+                            "Longest Run (days)": max(downward_runs),
+                            "Average Run (days)": round(sum(downward_runs)/len(downward_runs), 2),
+                            "Shortest Run (days)": min(downward_runs),
+                            "Total Days in Runs": sum(downward_runs)
+                        })
                     else:
-                        st.write("No downward runs found")
-                
-                if "Max Profit Calculations" in selected_analysis:
-                    st.subheader("Maximum Profit Calculation")
+                        runs_data.append({
+                            "Run Type": "Downward",
+                            "Total Runs": 0,
+                            "Longest Run (days)": "N/A",
+                            "Average Run (days)": "N/A",
+                            "Shortest Run (days)": "N/A",
+                            "Total Days in Runs": 0
+                        })
                     
-                    # Find optimal buy/sell points for maximum profit
-                    buy_date, sell_date, max_profit = calculate_max_profit(df)
+                    # Convert to DataFrame and display
+                    runs_df = pd.DataFrame(runs_data)
+                    st.dataframe(runs_df, use_container_width=True)
                     
-                    if max_profit > 0:
-                        # Get actual prices at buy/sell dates
-                        buy_price = df.loc[df.index == buy_date, 'Close'].iloc[0]
-                        sell_price = df.loc[df.index == sell_date, 'Close'].iloc[0]
+                    # Additional detailed view of individual runs (optional)
+                    st.subheader("Detailed Run Analysis")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write("**Upward Runs Distribution**")
+                        if upward_runs:
+                            # Create frequency table for upward runs
+                            upward_counts = pd.Series(upward_runs).value_counts().sort_index()
+                            upward_dist_df = pd.DataFrame({
+                                'Run Length (days)': upward_counts.index,
+                                'Frequency': upward_counts.values
+                            })
+                            st.dataframe(upward_dist_df, use_container_width=True)
+                            
+                            # Display as bar chart
+                            fig, ax = plt.subplots(figsize=(10, 4))
+                            upward_dist_df.plot(kind='bar', x='Run Length (days)', y='Frequency', 
+                                              ax=ax, color='green', alpha=0.7)
+                            ax.set_title('Distribution of Upward Run Lengths')
+                            ax.set_ylabel('Frequency')
+                            plt.xticks(rotation=45)
+                            st.pyplot(fig)
+                        else:
+                            st.write("No upward runs found")
+                    
+                    with col2:
+                        st.write("**Downward Runs Distribution**")
+                        if downward_runs:
+                            # Create frequency table for downward runs
+                            downward_counts = pd.Series(downward_runs).value_counts().sort_index()
+                            downward_dist_df = pd.DataFrame({
+                                'Run Length (days)': downward_counts.index,
+                                'Frequency': downward_counts.values
+                            })
+                            st.dataframe(downward_dist_df, use_container_width=True)
+                            
+                            # Display as bar chart
+                            fig, ax = plt.subplots(figsize=(10, 4))
+                            downward_dist_df.plot(kind='bar', x='Run Length (days)', y='Frequency', 
+                                                ax=ax, color='red', alpha=0.7)
+                            ax.set_title('Distribution of Downward Run Lengths')
+                            ax.set_ylabel('Frequency')
+                            plt.xticks(rotation=45)
+                            st.pyplot(fig)
+                        else:
+                            st.write("No downward runs found")
+                    
+                    # Summary statistics
+                    st.subheader("Summary Statistics")
+                    if upward_runs and downward_runs:
+                        total_runs = len(upward_runs) + len(downward_runs)
+                        upward_percentage = (len(upward_runs) / total_runs) * 100
+                        downward_percentage = (len(downward_runs) / total_runs) * 100
                         
-                        # Display results
-                        st.write(f"Best buy date: {buy_date.strftime('%Y-%m-%d')} at ${buy_price:.2f}")
-                        st.write(f"Best sell date: {sell_date.strftime('%Y-%m-%d')} at ${sell_price:.2f}")
-                        st.write(f"Maximum profit: ${max_profit:.2f} per share ({max_profit/buy_price*100:.2f}% return)")
+                        summary_data = {
+                            "Metric": ["Total Runs", "Upward Runs Percentage", "Downward Runs Percentage", 
+                                      "Overall Average Run Length", "Market Bias (Up/Down Ratio)"],
+                            "Value": [total_runs, 
+                                    f"{upward_percentage:.1f}%", 
+                                    f"{downward_percentage:.1f}%",
+                                    f"{(sum(upward_runs) + sum(downward_runs)) / total_runs:.2f} days",
+                                    f"{len(upward_runs)/len(downward_runs):.2f}" if downward_runs else "Infinite"]
+                        }
+                        summary_df = pd.DataFrame(summary_data)
+                        st.dataframe(summary_df, use_container_width=True)
+    
+    with tab3:
+        st.header("Advanced Analysis")
+        st.write("Comprehensive analysis including trend analysis, streak identification, and maximum profit calculations.")
+        
+        # Check if there are CSV files available for analysis
+        csv_files = [f for f in os.listdir(base_dir) if f.endswith(".csv")]
+        
+        if not csv_files:
+            st.warning("No CSV files found. Please download data first using the 'Download Data' tab.")
+        else:
+            # Let user select file and analysis options
+            filepath, selected_analysis = select_and_analyze_csv(base_dir, "advanced")
+            
+            if filepath and selected_analysis:
+                # Load and prepare data for analysis
+                df = pd.read_csv(filepath)
+                df['Date'] = pd.to_datetime(df['Date'])  # Convert to datetime
+                df.set_index('Date', inplace=True)  # Set date as index
+                
+                st.success(f"Loaded data from {os.path.basename(filepath)}")
+                
+                # TREND ANALYSIS SECTION
+                if "Trend Analysis" in selected_analysis:
+                    st.subheader("📊 Trend Analysis and Validation")
+                    
+                    # Extract ticker symbol from filename for display
+                    ticker_symbol = os.path.basename(filepath).split('_')[0]
+                    
+                    # Run trend analysis
+                    trend_results = run_trend_analysis(df, ticker_symbol)
+                    
+                    # Display trend statistics
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.write("**Manual Calculation Results:**")
+                        st.write(f"Upward Trends: {trend_results['manual_upward']}")
+                        st.write(f"Downward Trends: {trend_results['manual_downward']}")
+                        st.write(f"Longest Upward Streak: {trend_results['longest_up_streak']} days")
+                        st.write(f"Longest Downward Streak: {trend_results['longest_down_streak']} days")
+                    
+                    with col2:
+                        st.write("**Pandas Validation Results:**")
+                        st.write(f"Upward Trends: {trend_results['validated_upward']}")
+                        st.write(f"Downward Trends: {trend_results['validated_downward']}")
+                    
+                    # Display validation results
+                    st.write("**Validation Results:**")
+                    if trend_results['upward_match']:
+                        st.success("✅ Upward trends match!")
                     else:
-                        st.write("No profitable trading opportunity found in this period")
+                        st.error("❌ Upward trends don't match!")
+                    
+                    if trend_results['downward_match']:
+                        st.success("✅ Downward trends match!")
+                    else:
+                        st.error("❌ Downward trends don't match!")
+                    
+                    if trend_results['all_validations_passed']:
+                        st.success("🎉 All trend validations passed!")
+                        
+                        # Display trend candlestick chart
+                        st.subheader("Trend Candlestick Chart")
+                        fig = plot_trend_candlestick(
+                            trend_results['validated_data'], 
+                            trend_results['manual_results'], 
+                            ticker_symbol
+                        )
+                        st.pyplot(fig)
+                        
+                        # Display recent trend data
+                        st.write("**Recent Trend Data (Last 30 days):**")
+                        st.dataframe(trend_results['validated_data'][['Close', 'Upward_Trend', 'Downward_Trend']].tail(30))
+                    else:
+                        st.warning("Trend validation failed. Please check the data.")
+                
+                # MAX PROFIT ANALYSIS SECTION  
+                if "Max Profit Calculations" in selected_analysis:
+                    st.subheader("💰 Maximum Profit Analysis")
+                    
+                    # Let user choose which algorithm to use
+                    algorithm_choice = st.selectbox(
+                        "Select profit calculation algorithm:",
+                        ["Single Pass (O(n))", "Vectorized (O(n))", "Brute Force (O(n²))", "Validate All Methods"],
+                        key="profit_algorithm"
+                    )
+                    
+                    if algorithm_choice == "Single Pass (O(n))":
+                        # Use the original single pass algorithm
+                        buy_date, sell_date, max_profit = single_pass_max_profit(df)
+                        method_name = "Single Pass Algorithm"
+                        
+                    elif algorithm_choice == "Vectorized (O(n))":
+                        # Use the vectorized numpy algorithm
+                        buy_date, sell_date, max_profit = vectorized_max_profit(df)
+                        method_name = "Vectorized Algorithm"
+                        
+                    elif algorithm_choice == "Brute Force (O(n²))":
+                        # Use brute force (warning for large datasets)
+                        if len(df) > 1000:
+                            st.warning("Brute force algorithm may be slow for large datasets. Consider using a different method.")
+                        
+                        buy_date, sell_date, max_profit = brute_force_max_profit(df)
+                        method_name = "Brute Force Algorithm"
+                        
+                    else:  # Validate All Methods
+                        st.subheader("Algorithm Validation Results")
+                        validation_results = validate_max_profit_calculations(df)
+                        
+                        # Display results from all methods
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.write("**Single Pass (O(n))**")
+                            bd, sd, profit = validation_results['single_pass']
+                            if bd:
+                                st.write(f"Buy: {bd.strftime('%Y-%m-%d')}")
+                                st.write(f"Sell: {sd.strftime('%Y-%m-%d')}")
+                                st.write(f"Profit: ${profit:.2f}")
+                        
+                        with col2:
+                            st.write("**Vectorized (O(n))**")
+                            bd, sd, profit = validation_results['vectorized']
+                            if bd:
+                                st.write(f"Buy: {bd.strftime('%Y-%m-%d')}")
+                                st.write(f"Sell: {sd.strftime('%Y-%m-%d')}")
+                                st.write(f"Profit: ${profit:.2f}")
+                        
+                        with col3:
+                            st.write("**Brute Force (O(n²))**")
+                            bd, sd, profit = validation_results['brute_force']
+                            if bd:
+                                st.write(f"Buy: {bd.strftime('%Y-%m-%d')}")
+                                st.write(f"Sell: {sd.strftime('%Y-%m-%d')}")
+                                st.write(f"Profit: ${profit:.2f}")
+                        
+                        # Show validation result
+                        if validation_results['all_equal']:
+                            st.success("✅ All algorithms produced identical results!")
+                        else:
+                            st.error("❌ Algorithms produced different results!")
+                        
+                        # For the main display, use vectorized results
+                        buy_date, sell_date, max_profit = validation_results['vectorized']
+                        method_name = "Vectorized Algorithm (Validation Mode)"
+                    
+                    # Display results (unless we're in validation mode and results differ)
+                    if algorithm_choice != "Validate All Methods" or (algorithm_choice == "Validate All Methods" and validation_results['all_equal']):
+                        if max_profit > 0:
+                            # Get actual prices at buy/sell dates
+                            buy_price = df.loc[df.index == buy_date, 'Close'].iloc[0]
+                            sell_price = df.loc[df.index == sell_date, 'Close'].iloc[0]
+                            
+                            # Display results
+                            st.write(f"**Method used:** {method_name}")
+                            st.write(f"Best buy date: {buy_date.strftime('%Y-%m-%d')} at ${buy_price:.2f}")
+                            st.write(f"Best sell date: {sell_date.strftime('%Y-%m-%d')} at ${sell_price:.2f}")
+                            st.write(f"Maximum profit: ${max_profit:.2f} per share ({max_profit/buy_price*100:.2f}% return)")
+                            
+                            # Visualize the optimal buy/sell points
+                            fig, ax = plt.subplots(figsize=(14, 7))
+                            ax.plot(df.index, df['Close'], label='Close Price', color='blue', alpha=0.7)
+                            ax.scatter([buy_date, sell_date], [buy_price, sell_price], 
+                                     color=['green', 'red'], s=100, zorder=5)
+                            ax.annotate('Buy', xy=(buy_date, buy_price), xytext=(buy_date, buy_price*0.95),
+                                       arrowprops=dict(facecolor='green', shrink=0.05), fontsize=12)
+                            ax.annotate('Sell', xy=(sell_date, sell_price), xytext=(sell_date, sell_price*1.05),
+                                       arrowprops=dict(facecolor='red', shrink=0.05), fontsize=12)
+                            ax.set_title(f"Optimal Buy/Sell Points\nProfit: ${max_profit:.2f} ({max_profit/buy_price*100:.1f}%)")
+                            ax.set_xlabel('Date')
+                            ax.set_ylabel('Price')
+                            ax.legend()
+                            ax.grid(True)
+                            st.pyplot(fig)
+                        else:
+                            st.write("No profitable trading opportunity found in this period")
+
+                # DAILY RETURNS ANALYSIS SECTION
+                if "Daily Returns Analysis" in selected_analysis:
+                    st.subheader("📊 Daily Returns Analysis")
+                    
+                    # Option for user to input their buy price
+                    user_choice = st.radio(
+                        "Choose analysis type:",
+                        ["Standard Daily Returns (Day-to-Day)", "Returns Based on My Buy Price"],
+                        key="returns_choice"
+                    )
+                    
+                    if user_choice == "Returns Based on My Buy Price":
+                        # User inputs their purchase price
+                        buy_price = st.number_input(
+                            "Enter your buy price:",
+                            min_value=0.01,
+                            value=float(df['Close'].iloc[0]),  # Default to first available price
+                            step=0.01,
+                            key="user_buy_price"
+                        )
+                        
+                        if buy_price > 0:
+                            # Calculate returns based on user's buy price
+                            user_return_df = return_for_user_price(df.copy(), buy_price)
+                            
+                            # Display latest return information
+                            latest_row = user_return_df.iloc[-1]
+                            st.write("**Latest Return Based on Your Buy Price:**")
+                            
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("Current Price", f"${latest_row['Close']:.2f}")
+                            with col2:
+                                st.metric("Your Buy Price", f"${buy_price:.2f}")
+                            with col3:
+                                return_pct = latest_row['Percentage(%)']
+                                st.metric("Total Return", f"{return_pct:.2f}%")
+                            
+                            # Plot cumulative returns
+                            fig, ax = plt.subplots(figsize=(12, 6))
+                            ax.plot(user_return_df.index, user_return_df['Percentage(%)'], 
+                                   color='purple', linewidth=2)
+                            ax.set_title(f"Cumulative Returns Based on ${buy_price:.2f} Buy Price")
+                            ax.set_xlabel("Date")
+                            ax.set_ylabel("Return (%)")
+                            ax.grid(True, alpha=0.3)
+                            ax.axhline(y=0, color='red', linestyle='--', alpha=0.5)
+                            st.pyplot(fig)
+                            
+                            # Show recent data
+                            st.write("**Recent Returns Data:**")
+                            st.dataframe(user_return_df[['Close', 'Daily_Return', 'Percentage(%)']].tail(10))
+                    
+                    else:  # Standard Daily Returns
+                        # Run validation analysis
+                        returns_results = run_daily_returns_analysis(df)
+                        
+                        # Display validation results
+                        st.write("**Daily Returns Validation Results:**")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.write("**Pandas pct_change() Results (First 5 rows):**")
+                            st.dataframe(returns_results['validated_data'][['Close', 'Daily_Return', 'Percentage(%)']].head())
+                        
+                        with col2:
+                            st.write("**Manual Calculation Results (First 5 rows):**")
+                            st.dataframe(returns_results['manual_data'][['Close', 'Manual_Daily_Return', 'Percentage(%)']].head())
+                        
+                        # Show validation status
+                        if returns_results['validation_passed']:
+                            st.success("✅ Daily returns validation passed! Both methods yield identical results.")
+                        else:
+                            st.error("❌ Daily returns validation failed! Methods produced different results.")
+                        
+                        # Display latest values comparison
+                        st.write("**Latest Values Comparison:**")
+                        comparison_data = {
+                            'Method': ['Pandas pct_change', 'Manual Calculation'],
+                            'Close Price': [returns_results['latest_validated']['Close'], 
+                                          returns_results['latest_manual']['Close']],
+                            'Daily Return': [returns_results['latest_validated']['Daily_Return'], 
+                                           returns_results['latest_manual']['Manual_Daily_Return']],
+                            'Percentage': [returns_results['latest_validated']['Percentage(%)'], 
+                                         returns_results['latest_manual']['Percentage(%)']]
+                        }
+                        comparison_df = pd.DataFrame(comparison_data)
+                        st.dataframe(comparison_df)
+                        
+                        # Plot daily returns
+                        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
+                        
+                        # Plot 1: Daily returns over time
+                        ax1.plot(returns_results['validated_data'].index, 
+                                returns_results['validated_data']['Daily_Return'] * 100, 
+                                color='blue', alpha=0.7, linewidth=1)
+                        ax1.set_title("Daily Returns Over Time")
+                        ax1.set_ylabel("Daily Return (%)")
+                        ax1.grid(True, alpha=0.3)
+                        ax1.axhline(y=0, color='red', linestyle='--', alpha=0.5)
+                        
+                        # Plot 2: Histogram of daily returns
+                        daily_returns = returns_results['validated_data']['Daily_Return'].dropna() * 100
+                        ax2.hist(daily_returns, bins=50, color='green', alpha=0.7, edgecolor='black')
+                        ax2.set_title("Distribution of Daily Returns")
+                        ax2.set_xlabel("Daily Return (%)")
+                        ax2.set_ylabel("Frequency")
+                        ax2.grid(True, alpha=0.3)
+                        ax2.axvline(x=daily_returns.mean(), color='red', linestyle='--', 
+                                   label=f'Mean: {daily_returns.mean():.2f}%')
+                        ax2.legend()
+                        
+                        plt.tight_layout()
+                        st.pyplot(fig)
+                        
+                        # Display statistics
+                        st.write("**Daily Returns Statistics:**")
+                        stats_data = {
+                            'Statistic': ['Mean', 'Standard Deviation', 'Maximum Gain', 'Maximum Loss', 
+                                         'Positive Days', 'Negative Days', 'Zero Change Days'],
+                            'Value': [f"{daily_returns.mean():.4f}%",
+                                    f"{daily_returns.std():.4f}%",
+                                    f"{daily_returns.max():.4f}%",
+                                    f"{daily_returns.min():.4f}%",
+                                    f"{(daily_returns > 0).sum()} days",
+                                    f"{(daily_returns < 0).sum()} days", 
+                                    f"{(daily_returns == 0).sum()} days"]
+                        }
+                        stats_df = pd.DataFrame(stats_data)
+                        st.dataframe(stats_df, use_container_width=True)            
 
 # Standard Python idiom to run the main function when script is executed directly
 if __name__ == "__main__":
