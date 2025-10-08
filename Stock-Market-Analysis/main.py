@@ -837,8 +837,8 @@ def manual_daily_returns(df):
     
     # Calculate returns for each day compared to previous day
     for i in range(1, len(close_prices)):
-        r_t = (close_prices[i] - close_prices[i-1]) / close_prices[i-1]
-        daily_returns.append(round(r_t, 6))  # Round to 6 decimal places
+        price_return = (close_prices[i] - close_prices[i-1]) / close_prices[i-1]
+        daily_returns.append(round(price_return, 6))  # Round to 6 decimal places
     
     df['Manual_Daily_Return'] = daily_returns
     df['Percentage(%)'] = df['Manual_Daily_Return'] * 100  # Add percentage column
