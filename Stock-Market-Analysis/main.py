@@ -787,7 +787,7 @@ def plot_runs(df):
     ax.legend()
     plt.tight_layout()
     return fig
-# Add these functions to your existing code (place them with the other analysis functions)
+
 
 # Daily Returns Analysis Functions
 
@@ -837,8 +837,8 @@ def manual_daily_returns(df):
     
     # Calculate returns for each day compared to previous day
     for i in range(1, len(close_prices)):
-        price_return = (close_prices[i] - close_prices[i-1]) / close_prices[i-1]
-        daily_returns.append(round(price_return, 6))  # Round to 6 decimal places
+        r_t = (close_prices[i] - close_prices[i-1]) / close_prices[i-1]
+        daily_returns.append(round(r_t, 6))  # Round to 6 decimal places
     
     df['Manual_Daily_Return'] = daily_returns
     df['Percentage(%)'] = df['Manual_Daily_Return'] * 100  # Add percentage column
@@ -883,7 +883,8 @@ def main():
         st.session_state.data_downloaded = False  # Track if data was downloaded
     
     # Define base directory for storing CSV files
-    base_dir = r"C:\Users\Goh Jia Xin\Downloads\Project-1-Stock-Market-Trend-Analysis-main"
+    base_dir = r"C:\Users\Goh Jia Xin\Downloads\Project-1-Stock-Market-Trend-Analysis-main (1)\Project-1-Stock-Market-Trend-Analysis-main"
+
     
     # Create tabs for different functionalities 
     tab1, tab2, tab3 = st.tabs(["Download Data", "Basic Analysis", "Advanced Analysis"])
@@ -1641,139 +1642,7 @@ def main():
                 - Both methods should produce identical results when validated correctly
                 """)
             
-            # DAILY RETURNS ANALYSIS SECTION
-            if "Daily Returns Analysis" in selected_analysis:
-                st.subheader("📊 Daily Returns Analysis")
-                
-                # Option for user to input their buy price
-                user_choice = st.radio(
-                    "Choose analysis type:",
-                    ["Standard Daily Returns (Day-to-Day)", "Returns Based on My Buy Price"],
-                    key="returns_choice_main"
-                )
-                
-                if user_choice == "Returns Based on My Buy Price":
-                    # User inputs their purchase price
-                    buy_price = st.number_input(
-                        "Enter your buy price:",
-                        min_value=0.01,
-                        value=float(df['Close'].iloc[0]),  # Default to first available price
-                        step=0.01,
-                        key="user_buy_price"
-                    )
-                    
-                    if buy_price > 0:
-                        # Calculate returns based on user's buy price
-                        user_return_df = return_for_user_price(df.copy(), buy_price)
-                        
-                        # Display latest return information
-                        latest_row = user_return_df.iloc[-1]
-                        st.write("**Latest Return Based on Your Buy Price:**")
-                        
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("Current Price", f"${latest_row['Close']:.2f}")
-                        with col2:
-                            st.metric("Your Buy Price", f"${buy_price:.2f}")
-                        with col3:
-                            return_pct = latest_row['Percentage(%)']
-                            st.metric("Total Return", f"{return_pct:.2f}%")
-                        
-                        # Plot cumulative returns
-                        fig, ax = plt.subplots(figsize=(12, 6))
-                        ax.plot(user_return_df.index, user_return_df['Percentage(%)'], 
-                               color='purple', linewidth=2)
-                        ax.set_title(f"Cumulative Returns Based on ${buy_price:.2f} Buy Price")
-                        ax.set_xlabel("Date")
-                        ax.set_ylabel("Return (%)")
-                        ax.grid(True, alpha=0.3)
-                        ax.axhline(y=0, color='red', linestyle='--', alpha=0.5)
-                        st.pyplot(fig)
-                        
-                        # Show recent data
-                        st.write("**Recent Returns Data:**")
-                        st.dataframe(user_return_df[['Close', 'Daily_Return', 'Percentage(%)']].tail(10))
-                
-                else:  # Standard Daily Returns
-                    # Run validation analysis
-                    returns_results = run_daily_returns_analysis(df)
-                    
-                    # Display validation results
-                    st.write("**Daily Returns Validation Results:**")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.write("**Pandas pct_change() Results (First 5 rows):**")
-                        st.dataframe(returns_results['validated_data'][['Close', 'Daily_Return', 'Percentage(%)']].head())
-                    
-                    with col2:
-                        st.write("**Manual Calculation Results (First 5 rows):**")
-                        st.dataframe(returns_results['manual_data'][['Close', 'Manual_Daily_Return', 'Percentage(%)']].head())
-                    
-                    # Show validation status
-                    if returns_results['validation_passed']:
-                        st.success("✅ Daily returns validation passed! Both methods yield identical results.")
-                    else:
-                        st.error("❌ Daily returns validation failed! Methods produced different results.")
-                    
-                    # Display latest values comparison
-                    st.write("**Latest Values Comparison:**")
-                    comparison_data = {
-                        'Method': ['Pandas pct_change', 'Manual Calculation'],
-                        'Close Price': [returns_results['latest_validated']['Close'], 
-                                      returns_results['latest_manual']['Close']],
-                        'Daily Return': [returns_results['latest_validated']['Daily_Return'], 
-                                       returns_results['latest_manual']['Manual_Daily_Return']],
-                        'Percentage': [returns_results['latest_validated']['Percentage(%)'], 
-                                     returns_results['latest_manual']['Percentage(%)']]
-                    }
-                    comparison_df = pd.DataFrame(comparison_data)
-                    st.dataframe(comparison_df)
-                    
-                    # Plot daily returns
-                    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
-                    
-                    # Plot 1: Daily returns over time
-                    ax1.plot(returns_results['validated_data'].index, 
-                            returns_results['validated_data']['Daily_Return'] * 100, 
-                            color='blue', alpha=0.7, linewidth=1)
-                    ax1.set_title("Daily Returns Over Time")
-                    ax1.set_ylabel("Daily Return (%)")
-                    ax1.grid(True, alpha=0.3)
-                    ax1.axhline(y=0, color='red', linestyle='--', alpha=0.5)
-                    
-                    # Plot 2: Histogram of daily returns
-                    daily_returns = returns_results['validated_data']['Daily_Return'].dropna() * 100
-                    ax2.hist(daily_returns, bins=50, color='green', alpha=0.7, edgecolor='black')
-                    ax2.set_title("Distribution of Daily Returns")
-                    ax2.set_xlabel("Daily Return (%)")
-                    ax2.set_ylabel("Frequency")
-                    ax2.grid(True, alpha=0.3)
-                    ax2.axvline(x=daily_returns.mean(), color='red', linestyle='--', 
-                               label=f'Mean: {daily_returns.mean():.2f}%')
-                    ax2.legend()
-                    
-                    plt.tight_layout()
-                    st.pyplot(fig)
-                    
-                    # Display statistics
-                    st.write("**Daily Returns Statistics:**")
-                    stats_data = {
-                        'Statistic': ['Mean', 'Standard Deviation', 'Maximum Gain', 'Maximum Loss', 
-                                     'Positive Days', 'Negative Days', 'Zero Change Days'],
-                        'Value': [f"{daily_returns.mean():.4f}%",
-                                f"{daily_returns.std():.4f}%",
-                                f"{daily_returns.max():.4f}%",
-                                f"{daily_returns.min():.4f}%",
-                                f"{(daily_returns > 0).sum()} days",
-                                f"{(daily_returns < 0).sum()} days", 
-                                f"{(daily_returns == 0).sum()} days"]
-                    }
-                    stats_df = pd.DataFrame(stats_data)
-                    st.dataframe(stats_df, use_container_width=True)
         
-
 # Standard Python idiom to run the main function when script is executed directly
 if __name__ == "__main__":
     main()
