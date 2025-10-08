@@ -123,7 +123,7 @@ def select_and_analyze_csv(base_dir: str, tab_type="basic"):
         analysis_options = ["SMA", "Upward and Downward Runs", "Daily Returns", 
                            "Line Chart", "Candlestick Chart", "Seaborn SMA Chart", "Seaborn Runs Chart"]
     elif tab_type == "advanced":
-        analysis_options = ["Trend Analysis", "Max Profit Calculations", "Daily Returns Analysis", "Manual SMA Calculations & Validation"]
+        analysis_options = ["Trend Analysis", "Max Profit Calculations","Multiple Transactions Max Profit", "Daily Returns Analysis", "Manual SMA Calculations & Validation"]
     
     # Multi-select widget for analysis choices
     selected_analysis = st.multiselect(
@@ -454,6 +454,93 @@ def validate_max_profit_calculations(data):
         'all_equal': all_equal
     }
 
+def max_profit_multiple_transactions(data):
+    """Calculate maximum profit with multiple transactions allowed (Buy-Sell Stock II).
+    
+    Strategy: Buy whenever price increases from previous day (sum all positive differences).
+    
+    Args:
+        data (pd.DataFrame): Stock data with Date and Close prices
+        
+    Returns:
+        tuple: (total_profit, transactions) - Total profit and list of buy/sell transactions
+    """
+    dr = data.reset_index()
+    prices = dr['Close'].tolist()
+    n = len(prices)
+    
+    total_profit = 0.0
+    transactions = []  # List to store (buy_date, sell_date, profit) tuples
+    buy_date = None
+    hold_price = None
+    
+    for i in range(1, n):
+        # If price increases from previous day and we're not holding
+        if prices[i] > prices[i-1]:
+            if hold_price is None:  # Buy if not already holding
+                buy_date = dr.loc[i-1, 'Date']
+                hold_price = prices[i-1]
+                # st.write(f"Buy on {buy_date.strftime('%Y-%m-%d')} at ${hold_price:.2f}")
+        
+        # If price decreases or it's the last day and we're holding, sell
+        if hold_price is not None and (prices[i] < prices[i-1] or i == n-1):
+            sell_date = dr.loc[i-1, 'Date'] if prices[i] < prices[i-1] else dr.loc[i, 'Date']
+            sell_price = prices[i-1] if prices[i] < prices[i-1] else prices[i]
+            profit = sell_price - hold_price
+            
+            if profit > 0:  # Only add profitable transactions
+                total_profit += profit
+                transactions.append((buy_date, sell_date, profit))
+                # st.write(f"Sell on {sell_date.strftime('%Y-%m-%d')} at ${sell_price:.2f}, Profit: ${profit:.2f}")
+            
+            hold_price = None  # Reset holding status
+    
+    return total_profit, transactions
+
+def max_profit_multiple_transactions_simple(data):
+    """Simplified version: Sum all positive daily differences.
+    
+    This is the most efficient O(n) solution for multiple transactions.
+    
+    Args:
+        data (pd.DataFrame): Stock data with Close prices
+        
+    Returns:
+        float: Total maximum profit achievable
+    """
+    dr = data.reset_index()
+    prices = dr['Close'].tolist()
+    total_profit = 0.0
+    
+    for i in range(1, len(prices)):
+        if prices[i] > prices[i-1]:
+            total_profit += prices[i] - prices[i-1]
+    
+    return total_profit
+
+def validate_multiple_transactions(data):
+    """Validate multiple transactions profit calculation.
+    
+    Args:
+        data (pd.DataFrame): Stock data with Close prices
+        
+    Returns:
+        dict: Results from both methods
+    """
+    profit_complex, transactions = max_profit_multiple_transactions(data)
+    profit_simple = max_profit_multiple_transactions_simple(data)
+    
+    return {
+        'complex_method': {
+            'total_profit': profit_complex,
+            'transactions': transactions,
+            'num_transactions': len(transactions)
+        },
+        'simple_method': {
+            'total_profit': profit_simple
+        },
+        'validation_passed': abs(profit_complex - profit_simple) < 1e-9
+    }
 # Trend Analysis Functions
 
 def validate_trend(df):
@@ -1167,7 +1254,81 @@ def main():
                         st.dataframe(trend_results['validated_data'][['Close', 'Upward_Trend', 'Downward_Trend']].tail(30))
                     else:
                         st.warning("Trend validation failed. Please check the data.")
-                
+                #MULTIPLE TRANSACTIONS MAX PROFIT
+                if "Multiple Transactions Max Profit" in selected_analysis:
+                    st.subheader("💰 Multiple Transactions Max Profit (Buy-Sell Stock II)")
+    
+                    st.info("""
+                    **Strategy**: Buy whenever the price increases from the previous day and sell when it decreases.
+                    This captures all upward movements in the stock price.
+                    """)
+    
+                    # Run the analysis
+                    validation_results = validate_multiple_transactions(df)
+    
+                    # Display results
+                    col1, col2 = st.columns(2)
+    
+                    with col1:
+                        st.write("**Complex Method (with transaction details):**")
+                        st.write(f"Total Profit: ${validation_results['complex_method']['total_profit']:.2f}")
+                        st.write(f"Number of Transactions: {validation_results['complex_method']['num_transactions']}")
+    
+                    with col2:
+                        st.write("**Simple Method (sum of positive differences):**")
+                        st.write(f"Total Profit: ${validation_results['simple_method']['total_profit']:.2f}")
+                    # Validation result
+                    if validation_results['validation_passed']:
+                        st.success("✅ Both methods produce identical results!")
+                    else:
+                        st.error("❌ Methods produced different results!")    
+                    # Display transactions if any
+                    if validation_results['complex_method']['transactions']:
+                        st.subheader("Transaction Details")
+        
+                        transactions_data = []
+                        for i, (buy_date, sell_date, profit) in enumerate(validation_results['complex_method']['transactions'], 1):
+                            buy_price = df.loc[df.index == buy_date, 'Close'].iloc[0]
+                            sell_price = df.loc[df.index == sell_date, 'Close'].iloc[0]
+            
+                            transactions_data.append({
+                                'Transaction': i,
+                                'Buy Date': buy_date.strftime('%Y-%m-%d'),
+                                'Buy Price': f"${buy_price:.2f}",
+                                'Sell Date': sell_date.strftime('%Y-%m-%d'),
+                                'Sell Price': f"${sell_price:.2f}",
+                                'Profit': f"${profit:.2f}",
+                                'Return %': f"{(profit/buy_price)*100:.2f}%"
+                            })
+        
+                        transactions_df = pd.DataFrame(transactions_data)
+                        st.dataframe(transactions_df, use_container_width=True)
+                        # Visualization
+                        st.subheader("Transaction Visualization")
+                        fig, ax = plt.subplots(figsize=(14, 7))
+        
+                        # Plot price
+                        ax.plot(df.index, df['Close'], label='Close Price', color='blue', alpha=0.7)
+        
+                        # Mark buy and sell points
+                        for buy_date, sell_date, profit in validation_results['complex_method']['transactions']:
+                            buy_price = df.loc[df.index == buy_date, 'Close'].iloc[0]
+                            sell_price = df.loc[df.index == sell_date, 'Close'].iloc[0]
+            
+                            ax.scatter(buy_date, buy_price, color='green', s=100, zorder=5, marker='^')
+                            ax.scatter(sell_date, sell_price, color='red', s=100, zorder=5, marker='v')
+                            # Add arrows connecting buy to sell
+                            ax.annotate('', xy=(sell_date, sell_price), xytext=(buy_date, buy_price),
+                            arrowprops=dict(arrowstyle='->', color='purple', lw=2, alpha=0.7))
+        
+                        ax.set_title("Multiple Transactions Buy/Sell Points")
+                        ax.set_xlabel('Date')
+                        ax.set_ylabel('Price')
+                        ax.legend()
+                        ax.grid(True, alpha=0.3)
+                        st.pyplot(fig)
+                    else: 
+                        st.warning("No profitable transactions found in this period.")
                 # MAX PROFIT ANALYSIS SECTION  
                 if "Max Profit Calculations" in selected_analysis:
                     st.subheader("💰 Maximum Profit Analysis")
@@ -1611,6 +1772,7 @@ def main():
                     }
                     stats_df = pd.DataFrame(stats_data)
                     st.dataframe(stats_df, use_container_width=True)
+        
 
 # Standard Python idiom to run the main function when script is executed directly
 if __name__ == "__main__":
