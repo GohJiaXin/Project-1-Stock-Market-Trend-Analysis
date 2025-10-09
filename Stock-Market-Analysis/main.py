@@ -177,34 +177,37 @@ def display_candlesticks(data, title="CandleSticks Chart"):
 
 def calculate_sma(data, windows=[20, 50, 200]):
     """
-    Compute SMA for multiple window sizes using sliding window trick.
+    SMA calculation using cumulative sum (O(n) per window).
 
     Args:
-        data: DataFrame with 'Close' column
-        windows: list of integers (window sizes)
+        data (pd.DataFrame): DataFrame with a 'Close' column
+        windows (list[int]): List of window sizes (e.g., [20, 50, 200])
 
     Returns:
-        dict: {window_size: list_of_sma_values}
+        dict[int, list[float]]: Mapping window size -> SMA values
     """
-    close_prices = data['Close']
-    prices = list(close_prices)  # Ensure it's a list
+    close_prices = data['Close'].tolist()
     n = len(close_prices)
     sma_dict = {}
 
     for k in windows:
-        if k > n:
-            sma_dict[k] = []  # Window larger than data → empty
+        if k > n or k <= 0:
+            sma_dict[k] = []
             continue
 
-        result = []
-        # Calculate SMA only when a full window of k prices is available
-        for i in range(k - 1, n):
-            window = prices[i - k + 1:i + 1]
-            if len(window) == k:  # Ensure full window
-                window_sum = sum(window)
-                result.append(round(window_sum / k, 2))
+        # Compute cumulative sum array
+        cumsum = [0.0]
+        for price in close_prices:
+            cumsum.append(cumsum[-1] + price)
+        # cumsum[i] now holds sum of first i elements (exclusive)
 
-        sma_dict[k] = result
+        # Compute SMA using difference of cumsum
+        sma = []
+        for i in range(k, n + 1):
+            window_sum = cumsum[i] - cumsum[i - k]
+            sma.append(round(window_sum / k, 2))
+
+        sma_dict[k] = sma
 
     return sma_dict
 
