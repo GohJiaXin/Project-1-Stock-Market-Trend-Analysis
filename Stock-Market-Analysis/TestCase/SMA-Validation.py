@@ -1,78 +1,87 @@
-import unittest  # Import Python's built-in unit testing framework
-import pandas as pd  # Import pandas for data handling
-from unittest.mock import patch  # Import patch to mock functions during tests
-from SMA_validation import calculate_sma, fetch_stock_data, validate_sma  # Import functions to be tested
+import unittest
+import pandas as pd
+from unittest.mock import patch
+from SMA_validation import calculate_sma, fetch_stock_data, validate_sma
 
 
-# Unit test class for stock analysis functions
-class TestStockAnalysis(unittest.TestCase):
+class TestSMAEdgeCases(unittest.TestCase):
+    """Unified test suite covering core and edge cases for SMA computation and validation."""
+
     def setUp(self):
-        # Prepare sample stock data to use in tests
-        dates = pd.date_range(start='2023-01-01', end='2023-01-10', freq='D')  # 10 daily dates
+        """Prepare reusable sample data."""
+        dates = pd.date_range(start='2023-01-01', end='2023-01-10', freq='D')
         self.sample_data = pd.DataFrame({
-            'Close': [100, 101, 102, 103, 104, 105, 106, 107, 108, 109],  # Close prices
-            'Open': [99, 100, 101, 102, 103, 104, 105, 106, 107, 108],  # Open prices
-            'High': [101, 102, 103, 104, 105, 106, 107, 108, 109, 110],  # High prices
-            'Low': [98, 99, 100, 101, 102, 103, 104, 105, 106, 107],  # Low prices
-            'Volume': [1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900]  # Volume
-        }, index=dates)  # Set dates as index
+            'Close': [100, 101, 102, 103, 104, 105, 106, 107, 108, 109],
+            'Open': [99, 100, 101, 102, 103, 104, 105, 106, 107, 108],
+            'High': [101, 102, 103, 104, 105, 106, 107, 108, 109, 110],
+            'Low': [98, 99, 100, 101, 102, 103, 104, 105, 106, 107],
+            'Volume': [1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900]
+        }, index=dates)
 
-    def test_calculate_sma_valid_windows(self):
-        """Test SMA calculation for valid window sizes."""
-        windows = [3, 5]  # Define windows to test
-        result = calculate_sma(self.sample_data, windows)  # Calculate SMA
-        expected_sma_3 = [101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0]  # Expected 3-day SMA
-        expected_sma_5 = [102.0, 103.0, 104.0, 105.0, 106.0, 107.0]  # Expected 5-day SMA
-        self.assertEqual(result[3], expected_sma_3)  # Assert SMA matches expected
-        self.assertEqual(result[5], expected_sma_5)
+    # -------------------------------------------------------------------------
+    # CORE & EDGE CASES FOR calculate_sma
+    # -------------------------------------------------------------------------
+    def test_sma_all_edge_cases(self):
+        """Test calculate_sma() under normal, empty, oversized, and single-value conditions."""
+        # Case 1: Normal increasing prices (expected linear growth)
+        result = calculate_sma(self.sample_data, [3, 5])
+        expected_sma_3 = [101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0]
+        expected_sma_5 = [102.0, 103.0, 104.0, 105.0, 106.0, 107.0]
+        self.assertEqual(result[3], expected_sma_3, "3-day SMA should match expected values")
+        self.assertEqual(result[5], expected_sma_5, "5-day SMA should match expected values")
 
-    def test_calculate_sma_window_larger_than_data(self):
-        """Test SMA calculation when window size exceeds data length."""
-        windows = [20]  # Window bigger than data length
-        result = calculate_sma(self.sample_data, windows)  # Calculate SMA
-        self.assertEqual(result[20], [], "SMA for window larger than data should return empty list")  # Check empty result
+        # Case 2: Window larger than dataset length
+        oversized = calculate_sma(self.sample_data, [20])
+        self.assertEqual(oversized[20], [], "Window larger than data should return empty list")
 
-    def test_calculate_sma_single_value(self):
-        """Test SMA calculation with a window size of 1."""
-        windows = [1]  # Window of size 1
-        result = calculate_sma(self.sample_data, windows)  # Calculate SMA
-        expected = [float(x) for x in self.sample_data['Close']]  # SMA with window=1 is original prices
-        self.assertEqual(result[1], expected, "SMA with window=1 should match original prices")  # Assert match
+        # Case 3: Window = 1 (should match original Close prices)
+        single_window = calculate_sma(self.sample_data, [1])
+        expected_single = [float(x) for x in self.sample_data['Close']]
+        self.assertEqual(single_window[1], expected_single, "Window=1 should reproduce Close prices")
 
-    def test_validate_sma(self):
-        """Test SMA validation against pandas rolling mean."""
-        windows = [3, 5]  # Test windows
-        result = validate_sma(self.sample_data, windows)  # Validate SMA
-        self.assertTrue(result, "Manual SMA should match pandas rolling mean")  # Assert True
+        # Case 4: Empty DataFrame input
+        empty_data = pd.DataFrame({'Close': []})
+        empty_result = calculate_sma(empty_data, [3, 5])
+        self.assertEqual(empty_result[3], [], "Empty data should yield empty SMA list")
+        self.assertEqual(empty_result[5], [], "Empty data should yield empty SMA list")
 
-    @patch('yfinance.Ticker')  # Mock Ticker class to avoid real API calls
-    def test_fetch_stock_data(self, mock_ticker):
-        """Test fetching stock data with mocked yfinance."""
-        # Create fake stock data
-        mock_hist = pd.DataFrame({
+        # Case 5: Constant price series (SMA should equal that constant)
+        const_data = pd.DataFrame({'Close': [100, 100, 100, 100, 100]})
+        const_result = calculate_sma(const_data, [3])
+        self.assertTrue(all(v == 100.0 for v in const_result[3]),
+                        "Constant price series should produce identical SMA values")
+
+    # -------------------------------------------------------------------------
+    # VALIDATION AGAINST PANDAS
+    # -------------------------------------------------------------------------
+    def test_validate_sma_against_pandas(self):
+        """Validate manual SMA output against pandas rolling mean."""
+        result = validate_sma(self.sample_data, [3, 5])
+        # validate_sma() returns dict of window:bool -> all should be True
+        self.assertTrue(all(result.values()), "Manual SMA should match pandas rolling mean within tolerance")
+
+    # -------------------------------------------------------------------------
+    # MOCKED DATA FETCHING (non-SMA but required for coverage)
+    # -------------------------------------------------------------------------
+    @patch('yfinance.Ticker')
+    def test_fetch_stock_data_mocked(self, mock_ticker):
+        """Ensure fetch_stock_data() works correctly with mocked yfinance call."""
+        fake_hist = pd.DataFrame({
             'Close': [100, 101, 102],
             'Open': [99, 100, 101],
             'High': [101, 102, 103],
             'Low': [98, 99, 100],
             'Volume': [1000, 1100, 1200]
         }, index=pd.date_range(start='2023-01-01', periods=3, freq='D'))
-        mock_ticker.return_value.history.return_value = mock_hist  # Mock history method
+        mock_ticker.return_value.history.return_value = fake_hist
 
-        result = fetch_stock_data('AAPL', period='3d', interval='1d')  # Call function
-        self.assertEqual(len(result), 3, "Fetched data should have 3 rows")  # Check row count
-        # Ensure all required columns exist
+        result = fetch_stock_data('AAPL', period='3d', interval='1d')
+        self.assertEqual(len(result), 3, "Fetched data should have 3 rows")
         self.assertTrue(all(col in result.columns for col in ['Close', 'Open', 'High', 'Low', 'Volume']),
-                        "Data should contain required columns")
-        self.assertTrue(isinstance(result.index, pd.DatetimeIndex), "Index should be DatetimeIndex")  # Check index type
+                        "Fetched data should include required OHLCV columns")
+        self.assertIsInstance(result.index, pd.DatetimeIndex,
+                              "Index should be a pandas DatetimeIndex")
 
-    def test_calculate_sma_empty_data(self):
-        """Test SMA calculation with empty data."""
-        empty_data = pd.DataFrame({'Close': []})  # Empty DataFrame
-        windows = [3, 5]
-        result = calculate_sma(empty_data, windows)  # Calculate SMA
-        self.assertEqual(result[3], [], "SMA for empty data should return empty list")
-        self.assertEqual(result[5], [], "SMA for empty data should return empty list")
 
-# Run all unit tests when script is executed
 if __name__ == '__main__':
     unittest.main()
