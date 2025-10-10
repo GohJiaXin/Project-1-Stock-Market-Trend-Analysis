@@ -9,6 +9,8 @@ import mplfinance as mpf  # For creating financial charts (candlesticks)
 import numpy as np  # For numerical operations
 from io import BytesIO  # For handling file input/output operations
 import seaborn as sns  # For enhanced data visualization
+from pathlib import Path
+import tempfile
 
 def validate_with_yf(ticker: str) -> bool:
     """Validate stock symbol directly with yfinance.
@@ -208,6 +210,8 @@ def calculate_sma(data, windows=[20, 50, 200]):
         sma_dict[k] = result
 
     return sma_dict
+
+
 
 def validate_sma(data, window_size=[20, 50, 200]):
     """Validate manual SMA calculation against pandas rolling mean with tolerance."""
@@ -872,22 +876,64 @@ def run_daily_returns_analysis(df):
     }
 def main():
     """Main function to run the Streamlit application."""
-    st.title("📈 Stock Data Downloader & Analyzer")
-    st.write("This application downloads historical stock data from Yahoo Finance and provides analysis tools.")
-    
-    # Initialize session state variables to preserve state across reruns
-    if 'valid_symbol' not in st.session_state:
-        st.session_state.valid_symbol = False  # Track if current symbol is valid
-    if 'ticker' not in st.session_state:
-        st.session_state.ticker = ""  # Store current ticker symbol
-    if 'data_downloaded' not in st.session_state:
-        st.session_state.data_downloaded = False  # Track if data was downloaded
-    
-    # Define base directory for storing CSV files
-    base_dir = r"C:\Users\Goh Jia Xin\Downloads\Project-1-Stock-Market-Trend-Analysis-main (1)\Project-1-Stock-Market-Trend-Analysis-main"
 
-    
-    # Create tabs for different functionalities 
+    # ---------------------------------------------------------
+    # 🧭  Title and Intro (Move this BEFORE everything else)
+    # ---------------------------------------------------------
+    st.title("📈 Stock Data Downloader & Analyzer")
+    st.write(
+        "This application downloads historical stock data from Yahoo Finance "
+        "and provides analysis tools."
+    )
+    st.divider()  # Adds a clean horizontal separator line
+
+    # ---------------------------------------------------------
+    # ⚙️  Directory & Session Initialization
+    # ---------------------------------------------------------
+    from pathlib import Path
+    import tempfile
+
+    # 🔹 Robust base directory setup
+    default_base_dir = Path.home() / "StockData"
+    default_base_dir.mkdir(parents=True, exist_ok=True)
+
+    st.sidebar.subheader("📁 Data Directory Settings")
+    st.sidebar.caption("Leave blank to use the default folder in your home directory.")
+    custom_dir_input = st.sidebar.text_input(
+        "Custom directory path (optional):", value=str(default_base_dir)
+    ).strip()
+
+    if custom_dir_input:
+        base_dir = Path(custom_dir_input).expanduser()
+        try:
+            base_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            st.warning(f"⚠️ Could not create directory '{base_dir}'. Using default instead.\nError: {e}")
+            base_dir = default_base_dir
+    else:
+        base_dir = default_base_dir
+
+    # Cloud-safe fallback
+    import os
+    if not os.access(base_dir, os.W_OK):
+        base_dir = Path(tempfile.gettempdir()) / "stock_data"
+        base_dir.mkdir(exist_ok=True)
+        st.info(f"Using temporary directory: {base_dir}")
+
+    st.caption(f"📂 Data directory in use: {base_dir}")
+
+    # ✅ Initialize session variables
+    for key, default in {
+        "ticker": "",
+        "valid_symbol": False,
+        "data_downloaded": False
+    }.items():
+        if key not in st.session_state:
+            st.session_state[key] = default
+
+    # ---------------------------------------------------------
+    # 🧭 Tabs (Download, Basic, Advanced)
+    # ---------------------------------------------------------
     tab1, tab2, tab3 = st.tabs(["Download Data", "Basic Analysis", "Advanced Analysis"])
     
     with tab1:
@@ -920,8 +966,8 @@ def main():
             # Define filename for saving data
             filename = os.path.join(base_dir, f"{st.session_state.ticker}_{years}Y.csv")
             
-            # Button to initiate data download
-            if st.button("Download Stock Data", key="download_data"):
+        # Button to initiate data download
+        if st.button("Download Stock Data", key="download_data"):
                 with st.spinner(f"Downloading {years} years of data for {st.session_state.ticker}..."):
                     try:
                         # Download and clean data
