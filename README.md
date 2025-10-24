@@ -9,3 +9,4 @@ This project develops a comprehensive stock market analysis platform that transf
 - Upward/Downward Run Detection
 - Daily Return Assessment
 - Visualization Models for SMA, Upward/Downward Runs
+- AI-Powered Stock Recommendation
