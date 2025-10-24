@@ -10,7 +10,118 @@ import numpy as np  # For numerical operations
 from io import BytesIO  # For handling file input/output operations
 import seaborn as sns  # For enhanced data visualization
 from pathlib import Path
+from textblob import TextBlob
 import tempfile
+class YahooFinanceAnalyzer:
+    def __init__(self):
+        pass
+    
+    def get_stock_recommendation(self, symbol):
+        """Get comprehensive stock analysis using Yahoo Finance"""
+        try:
+            stock = yf.Ticker(symbol)
+            
+            # Get historical data
+            hist = stock.history(period="6mo")
+            
+            if hist.empty:
+                return "HOLD", "Insufficient data for analysis"
+            
+            # Get basic info
+            info = stock.info
+            
+            # Calculate simple indicators
+            current_price = hist['Close'].iloc[-1]
+            ma_50 = hist['Close'].rolling(50).mean().iloc[-1] if len(hist) >= 50 else current_price
+            ma_200 = hist['Close'].rolling(200).mean().iloc[-1] if len(hist) >= 200 else current_price
+            
+            # Get news sentiment
+            news_sentiment = self.analyze_news_sentiment(stock.news)
+            
+            return self.generate_recommendation(current_price, ma_50, ma_200, news_sentiment, info, hist)
+        except Exception as e:
+            return "HOLD", f"Analysis error: {str(e)}"
+    
+    def analyze_news_sentiment(self, news):
+        """Analyze sentiment from news headlines"""
+        if not news:
+            return 0.5  # Neutral
+        
+        sentiments = []
+        for item in news[:10]:  # Analyze first 10 news items
+            if 'title' in item:
+                text = item['title']
+                blob = TextBlob(text)
+                sentiments.append(blob.sentiment.polarity)
+        
+        return sum(sentiments) / len(sentiments) if sentiments else 0.5
+    
+    def generate_recommendation(self, price, ma_50, ma_200, news_sentiment, info, hist):
+        """Generate trading recommendation based on multiple factors"""
+        score = 0
+        reasons = []
+        
+        # Moving average analysis
+        if price > ma_50:
+            score += 1
+            reasons.append("Price above 50-day MA")
+        else:
+            score -= 1
+            reasons.append("Price below 50-day MA")
+            
+        if price > ma_200:
+            score += 1
+            reasons.append("Price above 200-day MA")
+        else:
+            score -= 1
+            reasons.append("Price below 200-day MA")
+        
+        # News sentiment
+        if news_sentiment > 0.1:
+            score += 1
+            reasons.append("Positive news sentiment")
+        elif news_sentiment < -0.1:
+            score -= 1
+            reasons.append("Negative news sentiment")
+        else:
+            reasons.append("Neutral news sentiment")
+        
+        # Recent price momentum (last 30 days)
+        if len(hist) >= 30:
+            price_30_days_ago = hist['Close'].iloc[-30]
+            if price > price_30_days_ago:
+                score += 1
+                reasons.append("Positive 30-day momentum")
+            else:
+                score -= 1
+                reasons.append("Negative 30-day momentum")
+        
+        # Fundamental analysis (if available)
+        if 'recommendationMean' in info:
+            mean_rec = info['recommendationMean']
+            if mean_rec <= 2.0:
+                score += 2
+                reasons.append("Strong analyst ratings")
+            elif mean_rec <= 2.5:
+                score += 1
+                reasons.append("Good analyst ratings")
+            elif mean_rec >= 3.0:
+                score -= 1
+                reasons.append("Weak analyst ratings")
+        
+        # Generate final recommendation
+        reason_text = " | ".join(reasons)
+        
+        if score >= 3:
+            return "STRONG BUY", reason_text
+        elif score >= 2:
+            return "BUY", reason_text
+        elif score >= 0:
+            return "HOLD", reason_text
+        elif score >= -2:
+            return "SELL", reason_text
+        else:
+            return "STRONG SELL", reason_text
 
 def validate_with_yf(ticker: str) -> bool:
     """Validate stock symbol directly with yfinance.
@@ -123,7 +234,7 @@ def select_and_analyze_csv(base_dir: str, tab_type="basic"):
     # Different analysis options based on tab type
     if tab_type == "basic":
         analysis_options = ["SMA", "Upward and Downward Runs", "Daily Returns", 
-                           "Line Chart", "Candlestick Chart", "Seaborn SMA Chart", "Seaborn Runs Chart"]
+                           "Line Chart", "Candlestick Chart", "Seaborn SMA Chart", "Seaborn Runs Chart", "AI Recommendation"]
     elif tab_type == "advanced":
         analysis_options = ["Trend Analysis", "Max Profit Calculations","Multiple Transactions Max Profit", "Daily Returns Analysis", "Manual SMA Calculations & Validation"]
     
@@ -1065,7 +1176,64 @@ def main():
                     for window, values in manual_sma.items():
                         if values:  # Only show if there are values
                             st.write(f"Window {window}: First 5 values: {values[:5]}")
-                
+                if "AI Recommendation" in selected_analysis:
+                    st.subheader("🤖 AI-Powered Stock Recommendation")
+                    # Extract ticker symbol from filename
+                    ticker_symbol = os.path.basename(filepath).split('_')[0]
+    
+                    with st.spinner("Analyzing stock with AI..."):
+                        try:
+                            analyzer = YahooFinanceAnalyzer()
+                            recommendation, reasoning = analyzer.get_stock_recommendation(ticker_symbol)
+
+                            # Display recommendation with appropriate color
+                            if "STRONG BUY" in recommendation:
+                                st.success(f"## 🎯 {recommendation}")
+                            elif "BUY" in recommendation:
+                                st.success(f"## ✅ {recommendation}")
+                            elif "HOLD" in recommendation:
+                                st.info(f"## ⏸️ {recommendation}")
+                            elif "SELL" in recommendation:
+                                st.warning(f"## ⚠️ {recommendation}")
+                            else:  # STRONG SELL
+                                st.error(f"## 🚨 {recommendation}")
+            
+                            st.write(f"**Reasoning:** {reasoning}")
+            
+                            # Additional metrics
+                            stock = yf.Ticker(ticker_symbol)
+                            info = stock.info
+            
+                            col1, col2, col3 = st.columns(3)
+            
+                            with col1:
+                                if 'currentPrice' in info:
+                                    st.metric("Current Price", f"${info['currentPrice']:.2f}")
+                            with col2:
+                                if 'recommendationMean' in info:
+                                    st.metric("Analyst Rating", f"{info['recommendationMean']:.1f}/5")
+                            with col3:
+                                if 'fiftyTwoWeekHigh' in info and 'fiftyTwoWeekLow' in info:
+                                    current = info.get('currentPrice', df['Close'].iloc[-1])
+                                    high = info['fiftyTwoWeekHigh']
+                                    low = info['fiftyTwoWeekLow']
+                                    position = (current - low) / (high - low) * 100
+                                    st.metric("52-Week Range", f"{position:.1f}%") 
+                            # Recent performance
+                            st.subheader("Recent Performance")
+                            hist = stock.history(period="1mo")
+                            if not hist.empty:
+                                start_price = hist['Close'].iloc[0]
+                                current_price = hist['Close'].iloc[-1]
+                                change = ((current_price - start_price) / start_price) * 100
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.metric("1-Month Change", f"{change:.2f}%")
+                                with col2:
+                                    st.metric("Volatility", f"{hist['Close'].pct_change().std()*100:.2f}%")
+                    
+                        except Exception as e:
+                            st.error(f"Error generating AI recommendation: {str(e)}")    
                 if "Seaborn SMA Chart" in selected_analysis:
                     st.subheader("Seaborn SMA Chart")
                     
